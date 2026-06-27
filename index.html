@@ -45,6 +45,8 @@
   .iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);
     font-size:18px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
   .iconbtn:active{transform:scale(.96)}
+  .iconbtn.spin{animation:lspin .8s linear infinite}
+  @keyframes lspin{to{transform:rotate(360deg)}}
   .tools{display:flex;gap:8px}
   .idbar{display:none;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .who{font-size:14px;padding:8px 14px;border-radius:999px;border:1px solid var(--border);background:var(--chip-bg);color:var(--text);cursor:pointer}
@@ -65,6 +67,7 @@
   .card:active{transform:scale(.98)}
   .card:hover{border-color:var(--border-strong)}
   .card.dim{opacity:.45}
+  body.styling .card{outline:1px dashed var(--brand);outline-offset:-2px}
   .tile{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;line-height:1}
   .name{font-size:15px;font-weight:600;line-height:1.35}
   .desc{font-size:12px;color:var(--muted);margin-top:1px}
@@ -114,8 +117,10 @@
       <div class="sub" id="sub">タップして開く</div>
     </div>
     <div class="tools">
+      <button class="iconbtn" id="refreshBtn" title="更新" aria-label="更新">🔄</button>
       <button class="iconbtn" id="themeBtn" title="表示切替" aria-label="表示切替">◐</button>
       <button class="iconbtn" id="editBtn" title="個人設定" aria-label="個人設定">✎</button>
+      <button class="iconbtn" id="styleBtn" title="見た目編集" aria-label="見た目編集" style="display:none">🎨</button>
       <button class="iconbtn" id="setBtn" title="設定" aria-label="設定">⚙</button>
     </div>
   </header>
@@ -170,6 +175,16 @@
   </div>
 </div>
 
+<!-- アイコン・色の編集（管理者のみ） -->
+<div class="ov" id="styleOv">
+  <div class="sheet">
+    <h2 id="styleTitle">アイコン・色を変更</h2>
+    <div class="field"><label>アイコン</label><div class="picker" id="stEmoji"></div></div>
+    <div class="field"><label>色</label><div class="picker" id="stColor"></div></div>
+    <div class="actions"><button class="btn" id="stCancel">キャンセル</button><button class="btn primary" id="stSave">保存</button></div>
+  </div>
+</div>
+
 <!-- 設定 -->
 <div class="ov" id="setOv">
   <div class="sheet settings">
@@ -189,7 +204,7 @@
 (function(){
   "use strict";
   var LS={apps:"launcher.apps",favs:"launcher.favs",recent:"launcher.recent",theme:"launcher.theme",ver:"launcher.ver",
-          identity:"launcher.identity",views:"launcher.views",hidden:"launcher.hidden"};
+          identity:"launcher.identity",views:"launcher.views",hidden:"launcher.hidden",updated:"launcher.updated"};
   var EMOJIS=["💰","📊","📈","🧾","✍️","📝","📅","📆","⏰","👥","🗂️","📁","🌐","🛒","📦","🏥","💆","🦴","🔧","🔔","📣","📷","⭐","🔗"];
   var COLORS=[
     {k:"teal",bg:"#E1F5EE",fg:"#085041"},{k:"blue",bg:"#E6F1FB",fg:"#0C447C"},
@@ -220,7 +235,9 @@
   var theme=load(LS.theme,"");
   var identity=load(LS.identity,null);
   var views=load(LS.views,["市原","川口","大宮"]);
-  var isAdmin=false, adminScope="全部", personalizing=false;
+  var isAdmin=false, adminScope="全部", personalizing=false, styling=false;
+  var lastUpdated=load(LS.updated,null), lastFetchAt=0;
+  var styleApp=null, stEmojiSel=EMOJIS[0], stColorSel=COLORS[0].k;
   var apps=[];
 
   if(!REMOTE_URL){
@@ -234,6 +251,9 @@
 
   function applyTheme(){document.documentElement.setAttribute("data-theme",theme||"");}
   function cacheKey(){return "launcher.cache."+(identity?identity.view:"_common");}
+  function pad2(n){return (n<10?"0":"")+n;}
+  function fmtTime(ts){var d=new Date(ts);return (d.getMonth()+1)+"/"+d.getDate()+" "+d.getHours()+":"+pad2(d.getMinutes());}
+  function renderUpdated(){ if(!REMOTE_URL)return; $("#sub").textContent=lastUpdated?("最終更新 "+fmtTime(lastUpdated)):"読み込み中…"; }
   function esc(s){return String(s).replace(/[&<>"]/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m];});}
 
   function cats(){var set=[];apps.forEach(function(a){if(a.cat&&set.indexOf(a.cat)<0)set.push(a.cat);});return set;}
@@ -299,7 +319,7 @@
         ((isAdmin && a.scope)?'<div class="scopetag">'+esc(a.scope)+'</div>':'')+'</div>'+
         '<div class="editrow local"><button class="mini ed">編集</button><button class="mini del">削除</button></div>'+
         '<div class="editrow personal"><button class="mini hd">'+(hidden.indexOf(a.id)>=0?"表示する":"非表示にする")+'</button></div>';
-      card.onclick=function(){openApp(a);};
+      card.onclick=function(){ if(styling && isAdmin){openStyle(a);return;} openApp(a);};
       card.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();openApp(a);}};
       card.querySelector(".fav").onclick=function(e){e.stopPropagation();toggleFav(a.id);};
       card.querySelector(".ed").onclick=function(e){e.stopPropagation();openEdit(a.id);};
@@ -330,6 +350,8 @@
     $("#whoLabel").textContent=(identity.view==="admin")?"管理者":identity.view;
     var sel=$("#adminScopeSel");
     if(isAdmin){ sel.style.display=""; buildAdminScope(); } else { sel.style.display="none"; }
+    var sb=$("#styleBtn");
+    if(sb){ sb.style.display=isAdmin?"":"none"; if(!isAdmin){ styling=false; document.body.classList.remove("styling"); sb.style.color=""; } }
   }
   function buildAdminScope(){
     var sel=$("#adminScopeSel");
@@ -367,19 +389,49 @@
     if(identity){
       apps=(data.apps||[]).map(normalizeRemote);
       save(cacheKey(),apps);
+      lastUpdated=Date.now(); save(LS.updated,lastUpdated); renderUpdated();
       closePicker(); updateIdBar(); render();
     }
   }
   window.__lcb=applyRemote;
-  function requestRemote(){
+  function requestRemote(spin){
     if(!REMOTE_URL)return;
+    lastFetchAt=Date.now();
+    var rb=$("#refreshBtn"); if(spin && rb)rb.classList.add("spin");
     var view=identity?identity.view:"";
     var pin=(identity&&identity.pin)?identity.pin:"";
     var s=document.createElement("script");
     var sep=REMOTE_URL.indexOf("?")<0?"?":"&";
+    function done(){ if(s.parentNode)s.parentNode.removeChild(s); if(rb)rb.classList.remove("spin"); }
     s.src=REMOTE_URL+sep+"view="+encodeURIComponent(view)+"&pin="+encodeURIComponent(pin)+"&callback=__lcb&t="+Date.now();
-    s.onerror=function(){if(s.parentNode)s.parentNode.removeChild(s);};
-    s.onload=function(){if(s.parentNode)s.parentNode.removeChild(s);};
+    s.onerror=done; s.onload=done;
+    document.body.appendChild(s);
+  }
+
+  /* ===== 管理者：アイコン・色をシートへ書き戻し ===== */
+  function buildStylePickers(){
+    var ep=$("#stEmoji");ep.innerHTML="";
+    EMOJIS.forEach(function(em){var b=document.createElement("button");b.className="pe"+(em===stEmojiSel?" on":"");b.textContent=em;b.onclick=function(){stEmojiSel=em;buildStylePickers();};ep.appendChild(b);});
+    var cp=$("#stColor");cp.innerHTML="";
+    COLORS.forEach(function(c){var b=document.createElement("button");b.className="pc"+(c.k===stColorSel?" on":"");b.style.background=c.bg;b.onclick=function(){stColorSel=c.k;buildStylePickers();};cp.appendChild(b);});
+  }
+  function openStyle(a){ styleApp=a; stEmojiSel=a.emoji||EMOJIS[0]; stColorSel=a.color||COLORS[0].k; $("#styleTitle").textContent=a.name; buildStylePickers(); $("#styleOv").classList.add("show"); }
+  function closeStyle(){ $("#styleOv").classList.remove("show"); styleApp=null; }
+  function saveStyle(){
+    if(!styleApp)return;
+    var nm=styleApp.name, em=stEmojiSel, co=stColorSel;
+    styleApp.emoji=em; styleApp.color=co; save(cacheKey(),apps); render(); closeStyle();
+    writeStyle(nm,em,co);
+  }
+  function writeStyle(name,emoji,color){
+    if(!REMOTE_URL || !identity || identity.view!=="admin") return;
+    lastFetchAt=Date.now();
+    var rb=$("#refreshBtn"); if(rb)rb.classList.add("spin");
+    var s=document.createElement("script");
+    var sep=REMOTE_URL.indexOf("?")<0?"?":"&";
+    function done(){ if(s.parentNode)s.parentNode.removeChild(s); if(rb)rb.classList.remove("spin"); }
+    s.src=REMOTE_URL+sep+"action=update&pin="+encodeURIComponent(identity.pin||"")+"&name="+encodeURIComponent(name)+"&emoji="+encodeURIComponent(emoji)+"&color="+encodeURIComponent(color)+"&callback=__lcb&t="+Date.now();
+    s.onerror=done; s.onload=done;
     document.body.appendChild(s);
   }
 
@@ -436,7 +488,7 @@
   function wireEvents(){
     $("#q").addEventListener("input",function(){query=this.value;render();});
     $("#editBtn").addEventListener("click",function(){
-      if(REMOTE_URL){ personalizing=!personalizing; document.body.classList.toggle("personalizing",personalizing); this.style.color=personalizing?"var(--brand)":""; render(); return; }
+      if(REMOTE_URL){ personalizing=!personalizing; if(personalizing){styling=false;document.body.classList.remove("styling");$("#styleBtn").style.color="";} document.body.classList.toggle("personalizing",personalizing); this.style.color=personalizing?"var(--brand)":""; render(); return; }
       document.body.classList.toggle("editing"); this.style.color=document.body.classList.contains("editing")?"var(--brand)":"";
     });
     $("#themeBtn").addEventListener("click",function(){theme=theme==="dark"?"light":(theme==="light"?"":"dark");save(LS.theme,theme);applyTheme();});
@@ -453,15 +505,26 @@
     $("#adminBtn").addEventListener("click",chooseAdmin);
     $("#adminCancel").addEventListener("click",function(){$("#adminPinBox").style.display="none";});
     $("#adminGo").addEventListener("click",adminGo);
+    $("#styleBtn").addEventListener("click",function(){ styling=!styling; if(styling){personalizing=false;document.body.classList.remove("personalizing");$("#editBtn").style.color="";} document.body.classList.toggle("styling",styling); this.style.color=styling?"var(--brand)":""; render(); });
+    $("#stSave").addEventListener("click",saveStyle);
+    $("#stCancel").addEventListener("click",closeStyle);
+    $("#styleOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#adminPin").addEventListener("keydown",function(e){if(e.key==="Enter")adminGo();});
     $("#setOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#editOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#f_name").addEventListener("keydown",function(e){if(e.key==="Enter")saveForm();});
+    var rb=$("#refreshBtn");
+    if(rb){ if(!REMOTE_URL){rb.style.display="none";} else { rb.addEventListener("click",function(){requestRemote(true);}); } }
+    function maybeRefresh(){ if(!REMOTE_URL||!identity)return; if(Date.now()-lastFetchAt<4000)return; requestRemote(true); }
+    document.addEventListener("visibilitychange",function(){ if(!document.hidden)maybeRefresh(); });
+    window.addEventListener("focus",maybeRefresh);
+    window.addEventListener("pageshow",function(){maybeRefresh();});
   }
 
   /* ===== 起動 ===== */
   applyTheme(); wireEvents();
   if(REMOTE_URL){
+    renderUpdated();
     if(identity){ isAdmin=(identity.view==="admin"); apps=load(cacheKey(),[])||[]; updateIdBar(); render(); requestRemote(); }
     else { render(); openPicker(); requestRemote(); }
   } else {
