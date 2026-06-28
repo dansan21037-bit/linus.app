@@ -68,6 +68,9 @@
   .card:hover{border-color:var(--border-strong)}
   .card.dim{opacity:.45}
   body.styling .card{outline:1px dashed var(--brand);outline-offset:-2px}
+  body.styling .editrow.admin{display:flex}
+  .newbadge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;color:#fff;background:var(--brand);border-radius:6px;padding:1px 6px;letter-spacing:.04em}
+  .pe.txt{width:auto;padding:0 12px;font-size:13px;font-weight:600}
   .tile{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;line-height:1}
   .name{font-size:15px;font-weight:600;line-height:1.35}
   .desc{font-size:12px;color:var(--muted);margin-top:1px}
@@ -120,7 +123,7 @@
       <button class="iconbtn" id="refreshBtn" title="更新" aria-label="更新">🔄</button>
       <button class="iconbtn" id="themeBtn" title="表示切替" aria-label="表示切替">◐</button>
       <button class="iconbtn" id="editBtn" title="個人設定" aria-label="個人設定">✎</button>
-      <button class="iconbtn" id="styleBtn" title="見た目編集" aria-label="見た目編集" style="display:none">🎨</button>
+      <button class="iconbtn" id="styleBtn" title="管理（追加・編集・並べ替え）" aria-label="管理" style="display:none">🎨</button>
       <button class="iconbtn" id="setBtn" title="設定" aria-label="設定">⚙</button>
     </div>
   </header>
@@ -175,13 +178,25 @@
   </div>
 </div>
 
-<!-- アイコン・色の編集（管理者のみ） -->
+<!-- アプリの追加・編集（管理者のみ） -->
 <div class="ov" id="styleOv">
   <div class="sheet">
-    <h2 id="styleTitle">アイコン・色を変更</h2>
+    <h2 id="styleTitle">アプリを編集</h2>
+    <div class="field"><label>アプリ名</label><input id="ae_name" placeholder="例）売上チェック" /></div>
+    <div class="field"><label>URL</label><input id="ae_url" type="url" inputmode="url" placeholder="https://..." /></div>
+    <div class="row2">
+      <div class="field"><label>カテゴリ</label><input id="ae_cat" list="catlist" placeholder="例）売上" /></div>
+      <div class="field"><label>並び順</label><input id="ae_order" type="number" inputmode="numeric" placeholder="数字" /></div>
+    </div>
+    <div class="field"><label>説明（任意）</label><input id="ae_desc" placeholder="例）3院の現金売上" /></div>
     <div class="field"><label>アイコン</label><div class="picker" id="stEmoji"></div></div>
     <div class="field"><label>色</label><div class="picker" id="stColor"></div></div>
-    <div class="actions"><button class="btn" id="stCancel">キャンセル</button><button class="btn primary" id="stSave">保存</button></div>
+    <div class="field"><label>公開範囲（だれに見せる）</label><div class="picker" id="ae_scope"></div></div>
+    <div class="actions">
+      <button class="btn" id="aeDelete" style="display:none;flex:0 0 auto;color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,var(--border))">削除</button>
+      <button class="btn" id="stCancel">キャンセル</button>
+      <button class="btn primary" id="stSave">保存</button>
+    </div>
   </div>
 </div>
 
@@ -256,7 +271,7 @@
   var views=load(LS.views,["市原","川口","大宮"]);
   var isAdmin=false, adminScope="全部", personalizing=false, styling=false;
   var lastUpdated=load(LS.updated,null), lastFetchAt=0;
-  var styleApp=null, stEmojiSel=EMOJIS[0], stColorSel=COLORS[0].k;
+  var editingApp=null, stEmojiSel=EMOJIS[0], stColorSel=COLORS[0].k, aeScopeSel=["共通"];
   var apps=[];
 
   if(!REMOTE_URL){
@@ -303,16 +318,18 @@
       list=list.filter(function(a){return (a.name+" "+(a.desc||"")+" "+(a.cat||"")).toLowerCase().indexOf(q)>=0;});}
     if(activeCat!=="最近"){
       list.sort(function(a,b){var fa=favs.indexOf(a.id)>=0?0:1,fb=favs.indexOf(b.id)>=0?0:1;
-        if(fa!==fb)return fa-fb;return a.name.localeCompare(b.name,"ja");});
+        if(fa!==fb)return fa-fb;return ((a.order||0)-(b.order||0)) || a.name.localeCompare(b.name,"ja");});
     }
     return list;
   }
 
   function openApp(a){
+    if(styling && isAdmin){openAdminEdit(a);return;}
     if(personalizing){toggleHide(a.id);return;}
     if(!a.url){ if(REMOTE_URL){manageInSheet();}else{openEdit(a.id);} return; }
     recent=[a.id].concat(recent.filter(function(x){return x!==a.id;})).slice(0,12);
     save(LS.recent,recent);
+    logUse(a);
     window.open(a.url,"_blank","noopener");
   }
   function manageInSheet(){ if(SHEET_URL){window.open(SHEET_URL,"_blank","noopener");}else{alert("スプレッドシートのURL(SHEET_URL)が未設定です");} }
@@ -329,7 +346,9 @@
       card.className="card"+((personalizing && hidden.indexOf(a.id)>=0)?" dim":"");
       card.setAttribute("role","button"); card.tabIndex=0;
       var favOn=favs.indexOf(a.id)>=0;
+      var isNew=a.added && (Date.now()-Date.parse(a.added) < 7*86400000);
       card.innerHTML=
+        (isNew?'<span class="newbadge">NEW</span>':'')+
         '<button class="fav'+(favOn?" on":"")+'" aria-label="お気に入り">'+(favOn?"★":"☆")+'</button>'+
         '<div class="tile" style="background:'+c.bg+';color:'+c.fg+'">'+(a.emoji||a.name.slice(0,1))+'</div>'+
         '<div><div class="name">'+esc(a.name)+'</div>'+
@@ -337,19 +356,24 @@
         (!a.url?'<div class="unset">URL未設定</div>':'')+
         ((isAdmin && a.scope)?'<div class="scopetag">'+esc(a.scope)+'</div>':'')+'</div>'+
         '<div class="editrow local"><button class="mini ed">編集</button><button class="mini del">削除</button></div>'+
-        '<div class="editrow personal"><button class="mini hd">'+(hidden.indexOf(a.id)>=0?"表示する":"非表示にする")+'</button></div>';
-      card.onclick=function(){ if(styling && isAdmin){openStyle(a);return;} openApp(a);};
+        '<div class="editrow personal"><button class="mini hd">'+(hidden.indexOf(a.id)>=0?"表示する":"非表示にする")+'</button></div>'+
+        '<div class="editrow admin"><button class="mini ae2">編集</button><button class="mini up">↑</button><button class="mini dn">↓</button><button class="mini del2">削除</button></div>';
+      card.onclick=function(){ if(styling && isAdmin){openAdminEdit(a);return;} openApp(a);};
       card.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();openApp(a);}};
       card.querySelector(".fav").onclick=function(e){e.stopPropagation();toggleFav(a.id);};
       card.querySelector(".ed").onclick=function(e){e.stopPropagation();openEdit(a.id);};
       card.querySelector(".del").onclick=function(e){e.stopPropagation();delApp(a.id);};
       card.querySelector(".hd").onclick=function(e){e.stopPropagation();toggleHide(a.id);};
+      card.querySelector(".ae2").onclick=function(e){e.stopPropagation();openAdminEdit(a);};
+      card.querySelector(".up").onclick=function(e){e.stopPropagation();move(a,-1);};
+      card.querySelector(".dn").onclick=function(e){e.stopPropagation();move(a,1);};
+      card.querySelector(".del2").onclick=function(e){e.stopPropagation();if(confirm("「"+a.name+"」を削除しますか？"))adminReq("action=delete&id="+encodeURIComponent(a.id),true);};
       grid.appendChild(card);
     });
     var add=document.createElement("div");
     add.className="card addcard";
-    add.innerHTML='<div class="tile" style="background:var(--bg);color:var(--muted)">＋</div><div class="name">'+(REMOTE_URL?"シートで追加・編集":"アプリを追加")+'</div>';
-    add.onclick=function(){ if(REMOTE_URL){manageInSheet();}else{openEdit(null);} };
+    add.innerHTML='<div class="tile" style="background:var(--bg);color:var(--muted)">＋</div><div class="name">アプリを追加</div>';
+    add.onclick=function(){ if(REMOTE_URL){ if(isAdmin){openAdminEdit(null);}else{manageInSheet();} }else{openEdit(null);} };
     grid.appendChild(add);
     if(list.length===0){var e=document.createElement("div");e.className="empty";
       e.textContent=query?"「"+query+"」に一致するアプリはありません":"表示できるアプリがありません";
@@ -392,9 +416,9 @@
     var name=(a.name||"").toString().trim();
     var scopes=a.scopes||((a.scope||"共通").toString().split(/[,、]/));
     scopes=scopes.map(function(s){return (s||"").toString().trim();}).filter(function(s){return s;});
-    return {id:"r_"+(name||("row"+i)),name:name,url:(a.url||"").toString(),cat:(a.cat||"その他").toString(),
+    return {id:(a.id?a.id.toString():("r_"+(name||("row"+i)))),name:name,url:(a.url||"").toString(),cat:(a.cat||"その他").toString(),
       desc:(a.desc||"").toString(),emoji:(a.emoji||"").toString(),color:(a.color||"gray").toString(),
-      scope:(a.scope||scopes.join(",")).toString(),scopes:scopes,remote:true};
+      scope:(a.scope||scopes.join(",")).toString(),scopes:scopes,order:(a.order!=null?a.order:0),added:(a.added||"").toString(),remote:true};
   }
   function applyRemote(data){
     if(!data)return;
@@ -434,24 +458,62 @@
     var cp=$("#stColor");cp.innerHTML="";
     COLORS.forEach(function(c){var b=document.createElement("button");b.className="pc"+(c.k===stColorSel?" on":"");b.style.background=c.bg;b.onclick=function(){stColorSel=c.k;buildStylePickers();};cp.appendChild(b);});
   }
-  function openStyle(a){ styleApp=a; stEmojiSel=a.emoji||EMOJIS[0]; stColorSel=a.color||COLORS[0].k; $("#styleTitle").textContent=a.name; buildStylePickers(); $("#styleOv").classList.add("show"); }
-  function closeStyle(){ $("#styleOv").classList.remove("show"); styleApp=null; }
-  function saveStyle(){
-    if(!styleApp)return;
-    var nm=styleApp.name, em=stEmojiSel, co=stColorSel;
-    styleApp.emoji=em; styleApp.color=co; save(cacheKey(),apps); render(); closeStyle();
-    writeStyle(nm,em,co);
+  function buildScopePicker(){
+    var opts=["共通","管理者"].concat(views);
+    var wrap=$("#ae_scope"); wrap.innerHTML="";
+    opts.forEach(function(o){
+      var b=document.createElement("button");
+      b.className="pe txt"+(aeScopeSel.indexOf(o)>=0?" on":""); b.textContent=o;
+      b.onclick=function(){ var i=aeScopeSel.indexOf(o); if(i>=0)aeScopeSel.splice(i,1); else aeScopeSel.push(o); buildScopePicker(); };
+      wrap.appendChild(b);
+    });
   }
-  function writeStyle(name,emoji,color){
+  function openAdminEdit(a){
+    editingApp=a||null;
+    $("#styleTitle").textContent=a?"アプリを編集":"アプリを追加";
+    $("#ae_name").value=a?a.name:""; $("#ae_url").value=a?(a.url||""):""; $("#ae_cat").value=a?(a.cat||""):"";
+    $("#ae_desc").value=a?(a.desc||""):""; $("#ae_order").value=a?(a.order||""):"";
+    stEmojiSel=a?(a.emoji||EMOJIS[0]):EMOJIS[0]; stColorSel=a?(a.color||COLORS[0].k):COLORS[0].k;
+    aeScopeSel=a?((a.scopes||[]).slice()):["共通"];
+    $("#aeDelete").style.display=a?"":"none";
+    refreshCatlist(); buildStylePickers(); buildScopePicker();
+    $("#styleOv").classList.add("show"); setTimeout(function(){$("#ae_name").focus();},50);
+  }
+  function closeStyle(){ $("#styleOv").classList.remove("show"); editingApp=null; }
+  function qstr(o){ var a=[]; for(var k in o) a.push(k+"="+encodeURIComponent(o[k])); return a.join("&"); }
+  function saveAdminEdit(){
+    var name=$("#ae_name").value.trim(); if(!name){alert("アプリ名を入力してください");return;}
+    var p={ name:name, url:$("#ae_url").value.trim(), cat:($("#ae_cat").value.trim()||"その他"),
+      desc:$("#ae_desc").value.trim(), emoji:stEmojiSel, color:stColorSel, scope:(aeScopeSel.join(",")||"共通") };
+    var ord=$("#ae_order").value.trim(); if(ord!=="")p.order=ord;
+    if(editingApp){ p.id=editingApp.id; adminReq("action=update&"+qstr(p),true); }
+    else { adminReq("action=add&"+qstr(p),true); }
+    closeStyle();
+  }
+  function adminReq(qs,spin){
     if(!REMOTE_URL || !identity || identity.view!=="admin") return;
     lastFetchAt=Date.now();
-    var rb=$("#refreshBtn"); if(rb)rb.classList.add("spin");
+    var rb=$("#refreshBtn"); if(spin && rb)rb.classList.add("spin");
     var s=document.createElement("script");
     var sep=REMOTE_URL.indexOf("?")<0?"?":"&";
     function done(){ if(s.parentNode)s.parentNode.removeChild(s); if(rb)rb.classList.remove("spin"); }
-    s.src=REMOTE_URL+sep+"action=update&pin="+encodeURIComponent(identity.pin||"")+"&name="+encodeURIComponent(name)+"&emoji="+encodeURIComponent(emoji)+"&color="+encodeURIComponent(color)+"&callback=__lcb&t="+Date.now();
-    s.onerror=done; s.onload=done;
-    document.body.appendChild(s);
+    s.src=REMOTE_URL+sep+qs+"&pin="+encodeURIComponent(identity.pin||"")+"&callback=__lcb&t="+Date.now();
+    s.onerror=done; s.onload=done; document.body.appendChild(s);
+  }
+  function writeFire(p){
+    if(!REMOTE_URL || !identity || identity.view!=="admin") return;
+    try{ new Image().src=REMOTE_URL+(REMOTE_URL.indexOf("?")<0?"?":"&")+"action=update&pin="+encodeURIComponent(identity.pin||"")+"&"+qstr(p)+"&t="+Date.now(); }catch(e){}
+  }
+  function move(a,dir){
+    var list=apps.slice().sort(function(x,y){return x.order-y.order;});
+    var idx=list.indexOf(a), j=idx+dir; if(j<0||j>=list.length)return;
+    var b=list[j], ao=a.order, bo=b.order; if(ao===bo){ao=idx;bo=j;}
+    a.order=bo; b.order=ao; save(cacheKey(),apps); render();
+    writeFire({id:a.id,order:a.order}); writeFire({id:b.id,order:b.order});
+  }
+  function logUse(a){
+    if(!REMOTE_URL || !identity || !a || !a.name) return;
+    try{ new Image().src=REMOTE_URL+(REMOTE_URL.indexOf("?")<0?"?":"&")+"action=log&app="+encodeURIComponent(a.name)+"&who="+encodeURIComponent(identity.view||"")+"&t="+Date.now(); }catch(e){}
   }
 
   /* ===== フォーム（ローカルモード用） ===== */
@@ -527,8 +589,9 @@
     $("#adminCancel").addEventListener("click",function(){$("#adminPinBox").style.display="none";});
     $("#adminGo").addEventListener("click",adminGo);
     $("#styleBtn").addEventListener("click",function(){ styling=!styling; if(styling){personalizing=false;document.body.classList.remove("personalizing");$("#editBtn").style.color="";} document.body.classList.toggle("styling",styling); this.style.color=styling?"var(--brand)":""; render(); });
-    $("#stSave").addEventListener("click",saveStyle);
+    $("#stSave").addEventListener("click",saveAdminEdit);
     $("#stCancel").addEventListener("click",closeStyle);
+    $("#aeDelete").addEventListener("click",function(){ if(editingApp && confirm("「"+editingApp.name+"」を削除しますか？")){ adminReq("action=delete&id="+encodeURIComponent(editingApp.id),true); closeStyle(); } });
     $("#styleOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#qrBtn").addEventListener("click",openQr);
     $("#qrClose").addEventListener("click",function(){$("#qrOv").classList.remove("show");});
