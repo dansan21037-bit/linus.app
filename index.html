@@ -185,10 +185,29 @@
   </div>
 </div>
 
+<!-- スマホに追加（QR・手順） -->
+<div class="ov" id="qrOv">
+  <div class="sheet">
+    <h2>スマホに追加</h2>
+    <div style="text-align:center;margin-bottom:14px">
+      <img id="qrImg" alt="QRコード" width="200" height="200" style="border:1px solid var(--border);border-radius:12px;background:#fff;padding:6px" />
+      <div id="qrUrl" style="font-size:12px;color:var(--muted);word-break:break-all;margin-top:8px"></div>
+    </div>
+    <div style="font-size:14px;line-height:1.9">
+      <div style="font-weight:600">iPhone（Safari）</div>
+      このQRを読み込む → 共有ボタン → 「ホーム画面に追加」
+      <div style="font-weight:600;margin-top:10px">Android（Chrome）</div>
+      このQRを読み込む → 右上「⋮」→ 「ホーム画面に追加」
+    </div>
+    <div class="actions" style="margin-top:16px"><button class="btn" id="qrClose">閉じる</button><button class="btn" id="qrCopy">URLをコピー</button></div>
+  </div>
+</div>
+
 <!-- 設定 -->
 <div class="ov" id="setOv">
   <div class="sheet settings">
     <h2>設定</h2>
+    <div class="srow"><span>📲 スマホに追加（QR・手順）</span><button class="link" id="qrBtn">表示</button></div>
     <div class="srow"><span>使う人を変更（院・管理者）</span><button class="link" id="changeWho">変更</button></div>
     <div class="srow"><span>個人の非表示をリセット</span><button class="link" id="resetHidden">リセット</button></div>
     <div class="srow"><span>アプリ一覧をバックアップ（JSON）</span><button class="link" id="exportBtn">書き出す</button></div>
@@ -460,6 +479,8 @@
 
   /* ===== 設定 ===== */
   function openSet(){$("#themeSel").value=theme;$("#setOv").classList.add("show");}
+  function launcherUrl(){ return location.origin+location.pathname; }
+  function openQr(){ var u=launcherUrl(); $("#qrImg").src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data="+encodeURIComponent(u); $("#qrUrl").textContent=u; closeSet(); $("#qrOv").classList.add("show"); }
   function closeSet(){$("#setOv").classList.remove("show");}
   function exportJson(){
     var blob=new Blob([JSON.stringify({apps:apps,favs:favs,hidden:hidden},null,2)],{type:"application/json"});
@@ -509,6 +530,10 @@
     $("#stSave").addEventListener("click",saveStyle);
     $("#stCancel").addEventListener("click",closeStyle);
     $("#styleOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
+    $("#qrBtn").addEventListener("click",openQr);
+    $("#qrClose").addEventListener("click",function(){$("#qrOv").classList.remove("show");});
+    $("#qrCopy").addEventListener("click",function(){ var b=this; try{navigator.clipboard.writeText(launcherUrl()).then(function(){b.textContent="コピーしました";});}catch(e){b.textContent=launcherUrl();} });
+    $("#qrOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#adminPin").addEventListener("keydown",function(e){if(e.key==="Enter")adminGo();});
     $("#setOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
     $("#editOv").addEventListener("click",function(e){if(e.target===this)this.classList.remove("show");});
